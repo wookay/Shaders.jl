@@ -1,13 +1,7 @@
-abstract type Application end
-abstract type Canvas end
-
-function draw_contents
-end
-
-function draw_all(app)
+function draw_all(app::T) where {T <: Application}
     draw_all(app.screen)
 end
 
-function set_visible(app, visible)
+function set_visible(app::T, visible::Bool) where {T <: Application}
     set_visible(app.screen, visible)
 end

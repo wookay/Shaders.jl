@@ -1,4 +1,4 @@
-function init(app)
+function init()
     #glfwSetErrorCallback
     if !GLFW.Init()
         throw(RuntimeError("Could not initialize GLFW!"))

@@ -1,7 +1,6 @@
-struct NVGcontext
-end
-
-mutable struct Screen
+mutable struct Screen <: Widget
+    children::Vector{Widget}
+    wsize::Vector2i
     glfw_window::GLFW.Window
     nvg_context::NVGcontext
     fbsize::Vector2i
@@ -12,6 +11,7 @@ mutable struct Screen
     drag_active::Bool
     last_interaction::Cdouble
     process_events::Bool
+    background::RGBA
     shutdown_glfw::Bool
     fullscreen::Bool
     depth_buffer::Bool
@@ -19,20 +19,23 @@ mutable struct Screen
     float_buffer::Bool
     redraw::Bool
     visible::Bool
+end
+
+struct Window <: Widget
+    children::Vector{Widget}
     wsize::Vector2i
+    screen::Screen
+    caption::AbstractString
 end
 
-struct Window
-    parent
-    caption
-end
-
-function Window(parent; caption::String = "")
-    Window(parent, caption)
+function Window(screen::Screen; caption::AbstractString = "")
+    wsize = screen.wsize
+    window = Window([], wsize, screen, caption)
+    add_child(screen, window)
 end
 
 # nanogui-mitsuba/src/screen.cpp
-function Screen(wsize::Vector2i, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)::Screen
+function Screen(wsize::Vector2i, background::RGBA, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)::Screen
     GLFW.WindowHint(GLFW.CLIENT_API, GLFW.OPENGL_API)
 
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MAJOR, gl_major)
@@ -60,7 +63,8 @@ function Screen(wsize::Vector2i, caption::String, resizable::Bool, fullscreen::B
     GLFW.WindowHint(GLFW.VISIBLE, false)
     GLFW.WindowHint(GLFW.RESIZABLE, resizable)
 
-    glfw_window = glfwCreateWindow(wsize..., caption, C_NULL, C_NULL)
+    children = Vector{Widget}()
+    glfw_window = GLFW.CreateWindow(wsize..., caption)
 
     if float_buffer
         float_mode = GLboolean(false)
@@ -74,33 +78,38 @@ function Screen(wsize::Vector2i, caption::String, resizable::Bool, fullscreen::B
     fbsize = GLFW.GetFramebufferSize(glfw_window)
     glViewport(0, 0, fbsize...)
 
-    background = RGBA(0.3, 0.3, 0.32, 1.)
     glClearColor(background)
 
     GLFW.SwapInterval(0)
     GLFW.SwapBuffers(glfw_window)
     GLFW.PollEvents()
 
+    ctx = NVGcontext()
+    shutdown_glfw = true
+    screen = initialize(children, wsize, glfw_window, ctx, background, shutdown_glfw, fullscreen, depth_buffer, stencil_buffer, float_buffer)
 #=
     glfwSetCursorPosCallback
     glfwSetMouseButtonCallback
-    glfwSetKeyCallback
     glfwSetCharCallback
     glfwSetDropCallback
     glfwSetScrollCallback
     glfwSetFramebufferSizeCallback
     glfwSetWindowFocusCallback
 =#
-    ctx = NVGcontext()
-    shutdown_glfw = true
-    initialize(glfw_window, ctx, shutdown_glfw, fullscreen, depth_buffer, stencil_buffer, float_buffer, wsize)
+    key_callback = function (_, key, scancode, action, mods)
+        !screen.process_events && return
+        screen.last_interaction = glfwGetTime()
+        screen.redraw |= keyboard_event(screen, key, scancode, action, mods)
+    end
+    GLFW.SetKeyCallback(screen.glfw_window, key_callback)
+    screen
 end
 
-function Screen(wsize::Vector2i; caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(2))::Screen
-    Screen(wsize::Vector2i, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)
+function Screen(wsize::Vector2i; background::RGBA = RGBA(0.3, 0.3, 0.32, 1.), caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(2))::Screen
+    Screen(wsize::Vector2i, background, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)
 end
 
-function initialize(glfw_window::GLFW.Window, ctx::NVGcontext, shutdown_glfw::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, wsize::Vector2i)::Screen
+function initialize(children::Vector{Widget}, wsize::Vector2i, glfw_window::GLFW.Window, ctx::NVGcontext, background::RGBA, shutdown_glfw::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool)::Screen
     fbsize = Vector2i(GLFW.GetFramebufferSize(glfw_window)...)
     pixel_ratio = get_pixel_ratio(glfw_window)
     visible = GLFW.GetWindowAttrib(glfw_window, GLFW.VISIBLE) != 0
@@ -111,6 +120,8 @@ function initialize(glfw_window::GLFW.Window, ctx::NVGcontext, shutdown_glfw::Bo
     process_events = true
     redraw = true
     Screen(
+        children::Vector{Widget},
+        wsize::Vector2i,
         glfw_window::GLFW.Window,
         ctx::NVGcontext,
         fbsize::Vector2i,
@@ -121,14 +132,14 @@ function initialize(glfw_window::GLFW.Window, ctx::NVGcontext, shutdown_glfw::Bo
         drag_active::Bool,
         last_interaction::Cdouble,
         process_events::Bool,
+        background::RGBA,
         shutdown_glfw::Bool,
         fullscreen::Bool,
         depth_buffer::Bool,
         stencil_buffer::Bool,
         float_buffer::Bool,
         redraw::Bool,
-        visible::Bool,
-        wsize::Vector2i)
+        visible::Bool)
 end
 
 function get_pixel_ratio(glfw_window::GLFW.Window)::Cfloat
@@ -172,4 +183,37 @@ function look_at(origin::Vector3f, target::Vector3f, up::Vector3f)
 end
 
 function perform_layout(screen::Screen)
+end
+
+function keyboard_event(_, key, scancode, action, modifiers)
+    false
+end
+
+function draw_all(screen::Screen)
+    if screen.redraw
+        screen.redraw = false
+
+        GLFW.MakeContextCurrent(screen.glfw_window)
+
+        # @c GLFW.GetFramebufferSize(screen.glfw_window, &m_fbsize[1], &m_fbsize[2]);
+        # @c GLFW.GetWindowSize(screen.glfw_window, &m_size[1], &m_size[2]);
+        #if m_size[0]
+        #    screen.m_pixel_ratio = (float) m_fbsize[0] / (float) m_size[0];
+        #end
+
+        (CHK ∘ glViewport)(0, 0, screen.fbsize...)
+
+        draw_contents(screen)
+        draw_widgets(screen)
+
+        GLFW.SwapBuffers(screen.glfw_window)
+    end
+end
+
+function draw_contents(screen::Screen)
+    glClearColor(screen.background)
+end
+
+function draw_widgets(screen::Screen)
+    draw(screen, screen.nvg_context)
 end

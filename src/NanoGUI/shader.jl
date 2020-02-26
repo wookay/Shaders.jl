@@ -15,9 +15,9 @@ mutable struct RenderPass
 #    CullMode m_cull_mode;
 #   ref<Object> m_blit_target;
     m_active::Bool
-    m_framebuffer_handle::UInt32
-#    int m_viewport_backup[4]
-#    m_scissor_backup[4]
+    m_framebuffer_handle::UInt64
+    m_viewport_backup::SVector{4, Cint}
+    m_scissor_backup::SVector{4, Cint}
     m_depth_test_backup::Bool
     m_depth_write_backup::Bool
     m_scissor_test_backup::Bool
@@ -47,7 +47,7 @@ end
 struct Shader
     render_pass::RenderPass
     name::String
-    m_buffers::Dict{String, Ref{ShaderBuffer}}
+    m_buffers::Dict{String, ShaderBuffer}
     m_blend_mode::BlendMode 
     m_shader_handle::UInt32
     m_vertex_array_handle::UInt32
@@ -76,7 +76,6 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
     #m_cull_mode(CullMode::Back)
     #m_blit_target(blit_target)
     m_active = false
-    m_framebuffer_handle::GLuint = 0
 
     m_targets[1] = depth_target
     m_targets[2] = stencil_target
@@ -91,7 +90,9 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
         m_depth_test = Always
     end
 
-    @c (CHK ∘ glGenFramebuffers)(1, &m_framebuffer_handle)
+    m_framebuffer_handle_32 = UInt32(0)
+    @c (CHK ∘ glGenFramebuffers)(1, &m_framebuffer_handle_32)
+    m_framebuffer_handle = UInt64(m_framebuffer_handle_32)
     (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, m_framebuffer_handle)
 
     draw_buffers = Vector{GLenum}()
@@ -126,8 +127,9 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
     end
     m_viewport_size = m_framebuffer_size
     if has_screen && !has_texture
-        @c (CHK ∘ glDeleteFramebuffers)(1, &m_framebuffer_handle)
-        m_framebuffer_handle = 0
+        m_framebuffer_handle_32 = UInt32(m_framebuffer_handle)
+        @c (CHK ∘ glDeleteFramebuffers)(1, &m_framebuffer_handle_32)
+        m_framebuffer_handle = UInt64(0)
     else
         (CHK ∘ glDrawBuffers)(GLsizei(length(draw_buffers)), draw_buffers)
         status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
@@ -137,6 +139,8 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
     end
     (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, 0)
 
+    m_viewport_backup = SVector{4, Cint}(0, 0, 0, 0)
+    m_scissor_backup = SVector{4, Cint}(0, 0, 0, 0)
     m_depth_test_backup = false
     m_depth_write_backup = false
     m_scissor_test_backup = false
@@ -156,9 +160,9 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
 #        CullMode m_cull_mode;
 #       ref<Object> m_blit_target;
         m_active::Bool,
-        m_framebuffer_handle::GLuint,
-#        int m_viewport_backup[4]
-#        m_scissor_backup[4]
+        m_framebuffer_handle::UInt64,
+        m_viewport_backup::SVector{4, Cint},
+        m_scissor_backup::SVector{4, Cint},
         m_depth_test_backup::Bool,
         m_depth_write_backup::Bool,
         m_scissor_test_backup::Bool,
@@ -168,8 +172,8 @@ end
 
 function begin_render_pass(render_pass::RenderPass)
     render_pass.m_active = true
-    (CHK ∘ glGetIntegerv)(GL_VIEWPORT, m_viewport_backup)
-    (CHK ∘ glGetIntegerv)(GL_SCISSOR_BOX, m_scissor_backup)
+    (CHK ∘ glGetIntegerv)(GL_VIEWPORT, render_pass.m_viewport_backup)
+    (CHK ∘ glGetIntegerv)(GL_SCISSOR_BOX, render_pass.m_scissor_backup)
 
     depth_write = GLboolean(false)
     @c (CHK ∘ glGetBooleanv)(GL_DEPTH_WRITEMASK, &depth_write)
@@ -180,8 +184,8 @@ function begin_render_pass(render_pass::RenderPass)
     m_cull_face_backup = glIsEnabled(GL_CULL_FACE)
     m_blend_backup = glIsEnabled(GL_BLEND)
 
-    (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, m_framebuffer_handle)
-    set_viewport(render_pass, m_viewport_offset, m_viewport_size)
+    (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, render_pass.m_framebuffer_handle)
+    set_viewport(render_pass, render_pass.m_viewport_offset, render_pass.m_viewport_size)
 end
 
 function set_viewport(render_pass::RenderPass, offset::Vector2i, size::Vector2i)
@@ -189,10 +193,10 @@ function set_viewport(render_pass::RenderPass, offset::Vector2i, size::Vector2i)
     render_pass.m_viewport_size = size
 
     if render_pass.m_active
-        ypos = m_framebuffer_size[2] - m_viewport_size[2] - m_viewport_offset[2]
-        (CHK ∘ glViewport)(m_viewport_offset[1], ypos, m_viewport_size...)
-        (CHK ∘ glScissor)(m_viewport_offset[1], ypos, m_viewport_size...)
-        if m_viewport_offset == Vector2i((0, 0)) && m_viewport_size == m_framebuffer_size
+        ypos = render_pass.m_framebuffer_size[2] - render_pass.m_viewport_size[2] - render_pass.m_viewport_offset[2]
+        (CHK ∘ glViewport)(render_pass.m_viewport_offset[1], ypos, render_pass.m_viewport_size...)
+        (CHK ∘ glScissor)(render_pass.m_viewport_offset[1], ypos, render_pass.m_viewport_size...)
+        if render_pass.m_viewport_offset == Vector2i(0, 0) && render_pass.m_viewport_size == render_pass.m_framebuffer_size
             (CHK ∘ glDisable)(GL_SCISSOR_TEST)
         else
             (CHK ∘ glEnable)(GL_SCISSOR_TEST)
@@ -201,20 +205,6 @@ function set_viewport(render_pass::RenderPass, offset::Vector2i, size::Vector2i)
 end
 
 function end_render_pass(render_pass::RenderPass)
-end
-
-function draw_contents(screen::Screen, shader::Shader)
-    m_rotation = 0
-    m_size = screen.wsize
-    view = look_at(Vector3f([0, -2, -10]), Vector3f([0, 0, 0]), Vector3f([0, 1, 0]))
-    model = [0, 1, 0, glfwGetTime()]
-    model2 = [1, 0, 0, m_rotation]
-    proj = [Cfloat(25 * pi / 180), 0.1, 20, m_size[1] / m_size[2]]
-    mvp = proj .* view .* model .* model2
-    set_uniform(shader, "mvp", mvp)
-    begin_shader(shader)
-    draw_array(Triangle, Csize_t(0), Csize_t(12*3), true)
-    end_shader(shader)
 end
 
 function set_uniform(shader::Shader, name::String, value::Array)
@@ -250,15 +240,15 @@ function begin_shader(shader::Shader)
 
     (CHK ∘ glBindVertexArray)(shader.m_vertex_array_handle)
 
-    for (key, bufref) in pairs(shader.m_buffers)
-        buf = bufref[]
+    for (key, buf) in pairs(shader.m_buffers)
+        @info :key key
         indices = key == "indices"
         if buf.buffer == C_NULL
             if !indices
             end
             continue
         end
-        buffer_id = get_buffer_id(buf)
+        buffer_id = UInt64(buf.buffer)
         gl_type = GLenum(0)
 
         if !buf.dirty && buf.buffer_type != VertexTexture && buf.buffer_type != FragmentTexture
@@ -295,35 +285,8 @@ function end_shader(shader::Shader)
     (CHK ∘ glUseProgram)(0)
 end
 
-function draw_all(screen::Screen)
-    if screen.redraw
-        screen.redraw = false
-
-        GLFW.MakeContextCurrent(screen.glfw_window)
-
-        # @c GLFW.GetFramebufferSize(screen.glfw_window, &m_fbsize[1], &m_fbsize[2]);
-        # @c GLFW.GetWindowSize(screen.glfw_window, &m_size[1], &m_size[2]);
-        #if m_size[0]
-        #    screen.m_pixel_ratio = (float) m_fbsize[0] / (float) m_size[0];
-        #end
-
-        (CHK ∘ glViewport)(0, 0, screen.fbsize...)
-
-        draw_contents(screen)
-
-        GLFW.SwapBuffers(screen.glfw_window)
-    end
-end
-
-function draw(ctx::NVGcontext)
-end
-
-function draw_contents(screen::Screen)
-    draw(screen.nvg_context)
-end
-
-function compile_gl_shader(shader_type::GLenum, name::String, shader::AbstractShader)::GLuint
-    isempty(shader.body) && GLuint(0)
+function compile_gl_shader(shader_type::GLenum, name::String, shader::AbstractShader)::UInt64
+    isempty(shader.body) && UInt64(0)
 
     id = glCreateShader(shader_type)
     shader_string_ptr = Ptr{GLchar}[pointer(shader.body)]
@@ -381,7 +344,7 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     uniform_count = GLint(0)
     @c (CHK ∘ glGetProgramiv)(m_shader_handle, GL_ACTIVE_UNIFORMS, &uniform_count)
 
-    m_buffers = Dict{String, Ref{ShaderBuffer}}()
+    m_buffers = Dict{String, ShaderBuffer}()
     for i in 1:attribute_count
         shader_name = Vector{UInt8}(undef, 128)
         shader_size = GLint(0)
@@ -405,7 +368,7 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     size = sizeof(dtype) * reduce(*, shape)
     dirty = false
     buf = ShaderBuffer(C_NULL, IndexBuffer, dtype, -1, Csize_t(1), shape, size, dirty)
-    m_buffers["indices"] = Ref(buf)
+    m_buffers["indices"] = buf
 
     m_vertex_array_handle = UInt32(0)
     @c (CHK ∘ glGenVertexArrays)(1, &m_vertex_array_handle)
@@ -416,7 +379,7 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     Shader(
         render_pass::RenderPass,
         name::String,
-        m_buffers::Dict{String, Ref{ShaderBuffer}},
+        m_buffers::Dict{String, ShaderBuffer},
         blend_mode::BlendMode,
         m_shader_handle::UInt32,
         m_vertex_array_handle::UInt32,
@@ -424,7 +387,7 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     )
 end
 
-function register_buffer(m_buffers::Dict{String, Ref{ShaderBuffer}}, buffer_type::BufferType, shader_name::String, index::Cint, gl_type::GLenum)
+function register_buffer(m_buffers::Dict{String, ShaderBuffer}, buffer_type::BufferType, shader_name::String, index::Cint, gl_type::GLenum)
     shape = Vector{Int}([1, 1, 1])
     ndim = 1 
     dtype = Nothing
@@ -506,17 +469,12 @@ function register_buffer(m_buffers::Dict{String, Ref{ShaderBuffer}}, buffer_type
         # buf.ndim++;
     end
     @info :shader_name shader_name
-    m_buffers[shader_name] = Ref(buf)
+    m_buffers[shader_name] = buf
 end
 
-function get_buffer_id(buf::ShaderBuffer)::GLuint
-    # buffer_id = convert(GLuint, buf.buffer)
-    unsafe_load(Ptr{GLuint}(buf.buffer))
-end
-
-function set_buffer(m_buffers::Dict{String, Ref{ShaderBuffer}}, shader_name::String, dtype::Union{Type{Array},DataType}, ndim::Int, shape::Vector{Int}, data)
-    @info :data data[1:5]
-    buf = m_buffers[shader_name][]
+function set_buffer(m_buffers::Dict{String, ShaderBuffer}, shader_name::String, dtype::Union{Type{Array},DataType}, ndim::Int, shape::Vector{Int}, data)
+    @info :data data[1:3]
+    buf = m_buffers[shader_name]
     if dtype === Array
         size = sizeof(Float64) * reduce(*, shape)
     else
@@ -531,15 +489,16 @@ function set_buffer(m_buffers::Dict{String, Ref{ShaderBuffer}}, shader_name::Str
         if buf.buffer == C_NULL
             buf.buffer = pointer(Vector{UInt8}(undef, size))
         end
-        buf.buffer = pointer(data)
-        #unsafe_copyto!(buf.buffer, data, size)
+        unsafe_copyto!(buf.buffer, Ptr{Cvoid}(pointer(data)), Csize_t(size))
     else
-        buffer_id = GLuint(0)
+        buffer_id::UInt64 = 0
         if buf.buffer != C_NULL
-            buffer_id = get_buffer_id(buf)
+            buffer_id = UInt64(buf)
         else
-            @c (CHK ∘ glGenBuffers)(1, &buffer_id)
-            buf.buffer = Base.unsafe_convert(Ptr{Cvoid}, Ref(buffer_id))
+            buffer_id_32 = UInt32(0)
+            @c (CHK ∘ glGenBuffers)(1, &buffer_id_32)
+            buffer_id = UInt64(buffer_id_32)
+            buf.buffer = Ptr{Cvoid}(buffer_id)
         end
         buf_type = GLenum(shader_name == "indices" ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER)
         (CHK ∘ glBindBuffer)(buf_type, buffer_id)
@@ -553,7 +512,7 @@ function set_buffer(m_buffers::Dict{String, Ref{ShaderBuffer}}, shader_name::Str
     buf.dirty = true
 end
 
-function draw_array(primitive_type::PrimitiveType, offset::Csize_t, count::Csize_t, indexed::Bool)
+function draw_array(primitive_type::PrimitiveType, offset::Int, count::Int, indexed::Bool)
     primitive_type_gl = if primitive_type == Point
         GL_POINTS
     elseif primitive_type == Line
