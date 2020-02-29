@@ -1,6 +1,9 @@
 @enum DepthTest Never Less Equal LessEqual Greater NotEqual GreaterEqual Always
 @enum BlendMode None AlphaBlend
 
+using ModernGL: GLFunc
+ModernGL.@glfunc glUniformMatrix1fv(location::GLint, count::GLsizei, transpose::GLboolean, value::Ptr{GLfloat})::Cvoid
+
 mutable struct RenderPass
     m_targets::Vector
     m_clear::Bool
@@ -207,30 +210,13 @@ end
 function end_render_pass(render_pass::RenderPass)
 end
 
-function set_uniform(shader::Shader, name::String, value::Array)
+function set_uniform(shader::Shader, name::String, value::Array{T}) where T
     shape = [1, 1, 1]
-    if ndims(value) == 0
-        data = Ref(value)
-        ndim = 0
-    elseif ndims(value) == 1
-        data = value
-        shape[1] = length(value)
-        ndim = 1
-    elseif ndims(value) == 2
-        data = value
-        shape[1] = length(value)
-        shape[2] = length(value[1])
-        ndim = 2
-    elseif ndims(value) == 3
-        data = value
-        shape[1] = length(value)
-        shape[2] = length(value[1])
-        shape[3] = length(value[1][1])
-        ndim = 3
-    else
-        throw(RuntimeError("Shader::set_uniform(): invalid input array dimension!"))
+    ndim = ndims(value)
+    for (idx, n) in enumerate(size(value))
+        shape[idx] = n
     end
-    set_buffer(shader.m_buffers, name, Array, ndim, shape, data)
+    set_buffer(shader, name, T, ndim, shape, value)
 end
 
 function begin_shader(shader::Shader)
@@ -241,13 +227,13 @@ function begin_shader(shader::Shader)
     (CHK ∘ glBindVertexArray)(shader.m_vertex_array_handle)
 
     for (key, buf) in pairs(shader.m_buffers)
-        @info :key key
-        indices = key == "indices"
         if buf.buffer == C_NULL
-            if !indices
+            if key != "indices"
+                println("begin_shader(): shader ", shader.name, " has an unbound argument ", key)
             end
             continue
         end
+
         buffer_id = UInt64(buf.buffer)
         gl_type = GLenum(0)
 
@@ -269,20 +255,82 @@ function begin_shader(shader::Shader)
                 throw(RuntimeError(msg))
             end
             (CHK ∘ glVertexAttribPointer)(buf.index, GLint(buf.shape[2]), gl_type, false, 0, C_NULL)
+        elseif buf.buffer_type in (VertexTexture, FragmentTexture)
+            (CHK ∘ glActiveTexture)(GL_TEXTURE0 + texture_unit)
+            (CHK ∘ glBindTexture)(GL_TEXTURE_2D, buffer_id)
+            buf.dirty && (CHK ∘ glUniform1i)(buf.index, texture_unit)
+            texture_unit += 1
+        elseif buf.buffer_type == UniformBuffer
+            buf.ndim > 2 && throw(RuntimeError(string(shader.name, ": uniform attribute ", key, "has an invalid shapeension (expected ndim=0/1/2, got ", buf.ndim)))
+            shape_idx = buf.shape[1]
+            if buf.dtype === Float32
+                if buf.ndim < 2
+                    if 1 <= shape_idx <= 4
+                        f = (glUniform1f, glUniform2f, glUniform3f, glUniform4f)[shape_idx]
+                        v = unsafe_wrap(Array, Ptr{Cfloat}(buf.buffer), shape_idx)
+                        (CHK ∘ f)(buf.index, v[1:shape_idx]...)
+                    else
+                        uniform_error = true
+                    end
+                elseif buf.ndim == 2 && buf.shape[1] == buf.shape[2]
+                    if 2 <= shape_idx <= 4
+                        f = (glUniformMatrix1fv, glUniformMatrix2fv, glUniformMatrix3fv, glUniformMatrix4fv)[shape_idx]
+                        #v = unsafe_wrap(Array, Ptr{Cfloat}(buf.buffer), 1)
+                        p = Ptr{Cfloat}(buf.buffer)
+                        (CHK ∘ f)(buf.index, 1, GL_FALSE, p)
+                    else
+                        uniform_error = true
+                    end
+                end
+            elseif buf.dtype == UInt32
+                if buf.ndim < 2 && 1 <= shape_idx <= 4
+                    v = unsafe_wrap(Array, Ptr{Cuint}(buf.buffer), shape_idx)
+                    f = (glUniform1ui, glUniform2ui, glUniform3ui, glUniform4ui)[shape_idx]
+                    (CHK ∘ f)(buf.index, v[1:shape_idx]...)
+                else
+                    uniform_error = true
+                end
+            end
+            uniform_error && throw(RuntimeError(string(shader.name, ": uniform attribute ", key, "has an unsupported dtype/shape configuration: ", buf)))
         else
+            throw(RuntimeError(string(shader.name, ": uniform attribute ", key, " has an unsupported dtype/shape configuration:", buf)))
         end
+        buf.dirty = false
     end
+    if shader.m_blend_mode == AlphaBlend
+        (CHK ∘ glEnable)(GL_BLEND)
+        (CHK ∘ glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    end
+    shader.m_uses_point_size && (CHK ∘ glEnable)(GL_PROGRAM_POINT_SIZE)
 end
 
 function end_shader(shader::Shader)
-    if shader.m_blend_mode == AlphaBlend
-        (CHK ∘ glDisable)(GL_BLEND)
-    end
-    if shader.m_uses_point_size
-        (CHK ∘ glDisable)(GL_PROGRAM_POINT_SIZE)
-    end
+    shader.m_blend_mode == AlphaBlend && (CHK ∘ glDisable)(GL_BLEND)
+    shader.m_uses_point_size          && (CHK ∘ glDisable)(GL_PROGRAM_POINT_SIZE)
     (CHK ∘ glBindVertexArray)(0)
     (CHK ∘ glUseProgram)(0)
+end
+
+function draw_array(primitive_type::PrimitiveType, offset::Int, count::Int, indexed::Bool)
+    primitive_type_gl =
+        if primitive_type == Point
+            GL_POINTS
+        elseif primitive_type == Line
+            GL_LINES
+        elseif primitive_type == LineStrip
+            GL_LINE_STRIP
+        elseif primitive_type == Triangle
+            GL_TRIANGLES
+        elseif primitive_type == TriangleStrip
+            GL_TRIANGLE_STRIP
+        else
+            throw(RuntimeError("Shader::draw_array(): invalid primitive type!"))
+        end
+    if indexed
+        (CHK ∘ glDrawElements)(primitive_type_gl, GLsizei(count), GL_UNSIGNED_INT, Ptr{Cvoid}(offset * sizeof(UInt32)))
+    else
+        (CHK ∘ glDrawArrays)(primitive_type_gl, GLint(offset), GLsizei(count))
+    end
 end
 
 function compile_gl_shader(shader_type::GLenum, name::String, shader::AbstractShader)::UInt64
@@ -334,7 +382,9 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     status::GLint = 0
     @c (CHK ∘ glGetProgramiv)(m_shader_handle, GL_LINK_STATUS, &status)
 
-    if status != true
+    if status != GL_TRUE
+        error_shader = Vector{Cchar}(undef, 4096)
+        @c (CHK ∘ glGetProgramInfoLog)(m_shader_handle, sizeof(error_shader), C_NULL, &error_shader)
         msg = string("Shader " + name + ": unable to link shader!")
         throw(RuntimeError(msg))
     end
@@ -366,13 +416,11 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
     dtype = UInt32
     shape = [0, 1, 1]
     size = sizeof(dtype) * reduce(*, shape)
-    dirty = false
-    buf = ShaderBuffer(C_NULL, IndexBuffer, dtype, -1, Csize_t(1), shape, size, dirty)
+    buf = ShaderBuffer(C_NULL, IndexBuffer, dtype, -1, Csize_t(1), shape, size, false)
     m_buffers["indices"] = buf
 
     m_vertex_array_handle = UInt32(0)
     @c (CHK ∘ glGenVertexArrays)(1, &m_vertex_array_handle)
-
     m_uses_point_size = false
     # m_uses_point_size = vertex_shader.find("gl_PointSize") != std::string::npos;
 
@@ -388,9 +436,11 @@ function Shader(render_pass::RenderPass, name::String, vertex_shader::VertexShad
 end
 
 function register_buffer(m_buffers::Dict{String, ShaderBuffer}, buffer_type::BufferType, shader_name::String, index::Cint, gl_type::GLenum)
-    shape = Vector{Int}([1, 1, 1])
-    ndim = 1 
-    dtype = Nothing
+    haskey(m_buffers, shader_name) && throw(RuntimeError("duplicate attribute/uniform name in shader code!"))
+    shader_name == "indices" && throw(RuntimeError("argument name `indices` is reserved!"))
+
+    shape = [1, 1, 1]
+    ndim::Csize_t = 1
     if gl_type == GL_FLOAT
         dtype = Float32
         ndim = 0
@@ -456,33 +506,49 @@ function register_buffer(m_buffers::Dict{String, ShaderBuffer}, buffer_type::Buf
         ndim = 0
         buffer_type = FragmentTexture
     else
-        throw(RuntimeError("Shader(): unsupported uniform/attribute type!"))
+        throw(RuntimeError(string("register_buffer: unsupported uniform/attribute type: ", gl_type)))
+    end
+    if buffer_type == VertexBuffer
+        for i in ndim:-1:1
+            shape[i + 1] = shape[i]
+        end
+        shape[1] = 0
+        ndim += 1
     end
     buffer = C_NULL
-    size = sizeof(dtype) * reduce(*, shape)
-    dirty = false
-    buf = ShaderBuffer(buffer, buffer_type, dtype, index, Csize_t(ndim), shape, size, dirty)
-    if buffer_type == VertexBuffer
-        # for (int i = (int) buf.ndim - 1; i >= 0; --i) {
-        #    buf.shape[i + 1] = buf.shape[i];
-        # buf.shape[0] = 0;
-        # buf.ndim++;
-    end
-    @info :shader_name shader_name
+    size::Csize_t = sizeof(dtype) * reduce(*, shape)
+    dirty = true
+    buf = ShaderBuffer(
+        buffer::Ptr{Cvoid},
+        buffer_type::BufferType,
+        dtype::Union{Type{Array},DataType},
+        index::Cint,
+        ndim::Csize_t,
+        shape::Vector{Int},
+        size::Csize_t,
+        dirty::Bool
+    )
     m_buffers[shader_name] = buf
 end
 
-function set_buffer(m_buffers::Dict{String, ShaderBuffer}, shader_name::String, dtype::Union{Type{Array},DataType}, ndim::Int, shape::Vector{Int}, data)
-    @info :data data[1:3]
-    buf = m_buffers[shader_name]
-    if dtype === Array
-        size = sizeof(Float64) * reduce(*, shape)
-    else
-        size = sizeof(dtype) * reduce(*, shape)
+function set_buffer(shader::Shader, shader_name::String, dtype::Union{Type{Array},DataType}, ndim::Int, shape::Vector{Int}, data)
+    buf = shader.m_buffers[shader_name]
+    mismatch = ndim != buf.ndim || dtype != buf.dtype
+    if buf.buffer_type == UniformBuffer
+        mismatch |= shape != buf.shape
+    elseif buf.buffer_type in (VertexBuffer, IndexBuffer)
+        for i in 2:3
+            mismatch |= shape[i] != buf.shape[i]
+        end
     end
+    if mismatch
+        throw(RuntimeError(string("set_buffer ", shader_name, ": shape/dtype mismatch: expected ", buf, " got ", (ndim, shape, dtype))))
+    end
+    size = sizeof(dtype) * reduce(*, shape)
 
     if buf.buffer_type == UniformBuffer
         if buf.buffer != C_NULL && buf.size != size
+            # delete[] (uint8_t *) buf.buffer;
             buf.buffer = C_NULL
             GC.gc()
         end
@@ -510,25 +576,4 @@ function set_buffer(m_buffers::Dict{String, ShaderBuffer}, shader_name::String, 
     buf.shape = shape
     buf.size  = size
     buf.dirty = true
-end
-
-function draw_array(primitive_type::PrimitiveType, offset::Int, count::Int, indexed::Bool)
-    primitive_type_gl = if primitive_type == Point
-        GL_POINTS
-    elseif primitive_type == Line
-        GL_LINES
-    elseif primitive_type == LineStrip
-        GL_LINE_STRIP
-    elseif primitive_type == Triangle
-        GL_TRIANGLES
-    elseif primitive_type == TriangleStrip
-        GL_TRIANGLE_STRIP
-    else
-        throw(RuntimeError("Shader::draw_array(): invalid primitive type!"))
-    end
-    if !indexed
-        (CHK ∘ glDrawArrays)(primitive_type_gl, GLint(offset), GLsizei(count))
-    else
-        (CHK ∘ glDrawElements)(primitive_type_gl, GLsizei(count), GL_UNSIGNED_INT, Ptr{Cvoid}(offset * sizeof(UInt32)))
-    end
 end

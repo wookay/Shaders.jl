@@ -173,15 +173,6 @@ function redraw(screen::Screen)
     end
 end
 
-function look_at(origin::Vector3f, target::Vector3f, up::Vector3f)
-    # dir = norm(target - origin)
-    # left = norm(cross(dir, up))
-    # new_up = cross(left, dir)
-    # column_t = -dot(left, origin) * -dot(new_up, origin) * dot(dir, origin) * 1.0
-    # [left, new_up, -dir, column_t]
-    [0, 0, 0, 0]
-end
-
 function perform_layout(screen::Screen)
 end
 

@@ -8,15 +8,24 @@ struct MyCanvas <: NanoGUI.Canvas
     shader::Shader
 end
 
+function perspective(fov, near, far, aspect = 1)
+    nmf = near - far
+    f = 1 / tan(fov)/2
+    [f/aspect 0                    0  0
+            0 f                    0  0
+            0 0     (near + far)/nmf -1
+            0 0 (2 * far * near)/nmf  0]
+end
+
 function draw_contents(canvas::MyCanvas)
     @info :draw_contents canvas
     m_rotation = 0
     m_size = canvas.wsize
-    view = look_at(Vector3f(0, -2, -10), Vector3f(0, 0, 0), Vector3f(0, 1, 0))
-    model = [0, 1, 0, glfwGetTime()]
-    model2 = [1, 0, 0, m_rotation]
-    proj = [Cfloat(25 * pi / 180), 0.1, 20, m_size[1] / m_size[2]]
-    mvp = proj .* view .* model .* model2
+    # look_at perspective
+    mvp = Cfloat[1 1 1 1
+                 1 1 1 1
+                 1 1 1 1
+                 1 1 1 1]
     set_uniform(canvas.shader, "mvp", mvp)
     begin_shader(canvas.shader)
     draw_array(Triangle, 0, 12*3, true)
@@ -44,7 +53,7 @@ function MyCanvas(parent::Window)
     void main() {
         color = frag_color;
     }"""), None)
-    
+
     indices = [
         3, 2, 6, 6, 7, 3,
         4, 5, 1, 1, 0, 4,
@@ -53,23 +62,23 @@ function MyCanvas(parent::Window)
         0, 1, 2, 2, 3, 0,
         7, 6, 5, 5, 4, 7
     ]
-    
+
     positions = [
         -1.0, 1.0, 1.0, -1.0, -1.0, 1.0,
         1.0, -1.0, 1.0, 1.0, 1.0, 1.0,
         -1.0, 1.0, -1.0, -1.0, -1.0, -1.0,
         1.0, -1.0, -1.0, 1.0, 1.0, -1.0
     ]
-    
+
     colors = [
         0, 1, 1, 0, 0, 1,
         1, 0, 1, 1, 1, 1,
         0, 1, 0, 0, 0, 0,
         1, 0, 0, 1, 1, 0
     ]
-    set_buffer(shader.m_buffers, "indices", UInt32, 1, [3*12, 1, 1], indices)
-    set_buffer(shader.m_buffers, "position", Float32, 2, [8, 3, 1], positions)
-    set_buffer(shader.m_buffers, "color", Float32, 2, [8, 3, 1], colors)
+    set_buffer(shader, "indices", UInt32, 1, [3*12, 1, 1], indices)
+    set_buffer(shader, "position", Float32, 2, [8, 3, 1], positions)
+    set_buffer(shader, "color", Float32, 2, [8, 3, 1], colors)
     wsize = parent.wsize
     canvas = MyCanvas([], wsize, shader)
     add_child(parent, canvas)
@@ -103,7 +112,6 @@ app = MyApplication()
 
 NanoGUI.init()
 
-@info app
 draw_all(app)
 set_visible(app, true)
 
