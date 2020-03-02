@@ -21,16 +21,10 @@ include("NanoGUI/glfw.jl")
 export Widget, add_child
 include("NanoGUI/widget.jl")
 
-export Screen, Window, set_visible, perform_layout, look_at
+export Screen, Window, set_visible
 include("NanoGUI/screen.jl")
 
-export RenderPass, VertexShader, FragmentShader, Shader
-export None
-export Triangle
-export begin_shader, end_shader, draw_array, set_uniform, set_buffer, draw_all
-include("NanoGUI/shader.jl")
-
-export NVGcontext
+export NVGcontext, draw_all
 include("NanoGUI/application.jl")
 
 include("NanoGUI/mainloop.jl")

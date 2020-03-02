@@ -15,10 +15,6 @@ function glfwSetTime(time::Integer)
     ccall((:glfwSetTime, GLFW.libglfw), Cvoid, (Cdouble,), time)
 end
 
-#function glfwCreateWindow(width::Integer, height::Integer, title::AbstractString, monitor, share)
-#    ccall((:glfwCreateWindow, GLFW.libglfw), GLFW.Window, (Cint, Cint, Cstring, Ptr{Cvoid}, Ptr{Cvoid}), width, height, title, monitor, share)
-#end
-
 function ModernGL.glClearColor(background::RGBA)
     glClearColor(background.r, background.g, background.b, background.alpha)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)

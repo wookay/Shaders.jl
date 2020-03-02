@@ -1,88 +1,84 @@
 using Shaders.NanoGUI # GLFW
 
 import .NanoGUI: draw_contents, draw, keyboard_event
+using ModernGL # glDrawArrays
+using CSyntax
 
 struct MyCanvas <: NanoGUI.Canvas
     children::Vector{Widget}
-    wsize::Vector2i
-    shader::Shader
-end
-
-function perspective(fov, near, far, aspect = 1)
-    nmf = near - far
-    f = 1 / tan(fov)/2
-    [f/aspect 0                    0  0
-            0 f                    0  0
-            0 0     (near + far)/nmf -1
-            0 0 (2 * far * near)/nmf  0]
+    destructor
 end
 
 function draw_contents(canvas::MyCanvas)
-    # @info :draw_contents canvas
-    t::Cfloat = glfwGetTime()
-    @info :t t
-    m_rotation::Cfloat = 0
-    m_size = canvas.wsize
-    # look_at perspective
-    mvp = Cfloat[1 1 1 1
-                 1 1 1 1
-                 1 1 1 1
-                 1 1 1 1]
-    set_uniform(canvas.shader, "mvp", mvp)
-    begin_shader(canvas.shader)
-    draw_array(Triangle, 0, 12*3, true)
-    end_shader(canvas.shader)
+    glDrawArrays(GL_TRIANGLES, 0, 3)
 end
 
+GLSL(src) = """
+#version 150 core
+$src
+"""
+
 function MyCanvas(parent::Window)
-    color_targets = [parent.screen]
-    depth_target = C_NULL
-    stencil_target = C_NULL
-    blit_target = C_NULL
-    clear = false
-    render_pass = RenderPass(color_targets, depth_target, stencil_target, blit_target, clear)
-    shader = Shader(render_pass, "a_simple_shader", VertexShader("""#version 330
-    uniform mat4 mvp;
-    in vec3 position;
-    in vec3 color;
-    out vec4 frag_color;
-    void main() {
-        frag_color = vec4(color, 1.0);
-        gl_Position = mvp * vec4(position, 1.0);
-    }"""), FragmentShader("""#version 330
-    out vec4 color;
-    in vec4 frag_color;
-    void main() {
-        color = frag_color;
-    }"""), None)
+    vao = GLuint(0)
+    @c glGenVertexArrays(1, &vao)
+    glBindVertexArray(vao)
 
-    indices = [
-        3, 2, 6, 6, 7, 3,
-        4, 5, 1, 1, 0, 4,
-        4, 0, 3, 3, 7, 4,
-        1, 5, 6, 6, 2, 1,
-        0, 1, 2, 2, 3, 0,
-        7, 6, 5, 5, 4, 7
+    vbo = GLuint(0)
+    @c glGenBuffers(1, &vbo)
+    glBindBuffer(GL_ARRAY_BUFFER, vbo)
+
+    vertices = Cfloat[
+         0.0,  0.5,
+         0.5, -0.5,
+        -0.5, -0.5,
     ]
 
-    positions = [
-        -1.0, 1.0, 1.0, -1.0, -1.0, 1.0,
-        1.0, -1.0, 1.0, 1.0, 1.0, 1.0,
-        -1.0, 1.0, -1.0, -1.0, -1.0, -1.0,
-        1.0, -1.0, -1.0, 1.0, 1.0, -1.0
-    ]
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
 
-    colors = [
-        0, 1, 1, 0, 0, 1,
-        1, 0, 1, 1, 1, 1,
-        0, 1, 0, 0, 0, 0,
-        1, 0, 0, 1, 1, 0
-    ]
-    set_buffer(shader, "indices", UInt32, 1, [3*12, 1, 1], indices)
-    set_buffer(shader, "position", Float32, 2, [8, 3, 1], positions)
-    set_buffer(shader, "color", Float32, 2, [8, 3, 1], colors)
-    wsize = parent.wsize
-    canvas = MyCanvas([], wsize, shader)
+    vertexSource = GLSL("""
+in vec2 position;
+
+void main() {
+    gl_Position = vec4(position, 0.0, 1.0);
+}
+    """)
+
+    vertexShader = glCreateShader(GL_VERTEX_SHADER)
+    glShaderSource(vertexShader, 1, [pointer(vertexSource)], C_NULL)
+    glCompileShader(vertexShader)
+
+    fragmentSource = GLSL("""
+out vec4 outColor;
+
+void main() {
+    outColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+}
+    """)
+
+    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER)
+    @c glShaderSource(fragmentShader, 1, [pointer(fragmentSource)], C_NULL)
+    glCompileShader(fragmentShader)
+
+    shaderProgram = glCreateProgram()
+    glAttachShader(shaderProgram, vertexShader)
+    glAttachShader(shaderProgram, fragmentShader)
+    glBindFragDataLocation(shaderProgram, 0, "outColor")
+    glLinkProgram(shaderProgram)
+    glUseProgram(shaderProgram)
+
+    posAttrib = glGetAttribLocation(shaderProgram, "position")
+    glEnableVertexAttribArray(posAttrib)
+    glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, C_NULL)
+
+    function destructor()
+        glDeleteProgram(shaderProgram)
+        glDeleteShader(fragmentShader)
+        glDeleteShader(vertexShader)
+        @c glDeleteBuffers(1, &vbo)
+        @c glDeleteVertexArrays(1, &vao)
+    end
+
+    canvas = MyCanvas([], destructor)
     add_child(parent, canvas)
 end
 
@@ -105,8 +101,7 @@ end
 function MyApplication()
     screen = NanoGUI.Screen(Vector2i(800, 600), caption="NanoGUI Test", resizable=false)
     window = NanoGUI.Window(screen, caption="Canvas widget demo")
-    canvas = MyCanvas(window)
-    perform_layout(screen)
+    MyCanvas(window)
     MyApplication(screen)
 end
 

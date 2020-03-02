@@ -13,7 +13,7 @@ function mainloop(app, refresh::Float64)
         num_screens = 0
         if !app.screen.visible
         elseif GLFW.WindowShouldClose(app.screen.glfw_window)
-            set_visible(app.screen, false)
+            set_visible(app, false)
         else
             num_screens += 1
             draw_all(app.screen)
@@ -55,6 +55,7 @@ function mainloop(app, refresh::Float64)
 end
 
 function shutdown(app)
+    dispose(app.screen)
     GLFW.DestroyWindow(app.screen.glfw_window)
     GLFW.Terminate()
 end
