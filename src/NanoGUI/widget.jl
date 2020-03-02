@@ -18,7 +18,7 @@ function draw(widget::W, ctx::NVGcontext) where {W <: Widget}
 end
 
 function dispose(widget::W) where {W <: Widget}
-    dispose.(widget.children)
+    hasfield(W, :children) && dispose.(widget.children)
     hasfield(W, :destructor) && widget.destructor()
 end
 

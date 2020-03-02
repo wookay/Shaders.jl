@@ -1,11 +1,10 @@
-using Shaders.NanoGUI # GLFW
+using Shaders.NanoGUI
 
-import .NanoGUI: draw_contents, draw, keyboard_event
-using ModernGL # glDrawArrays
+import .NanoGUI: draw_contents, keyboard_event
+using ModernGL
 using CSyntax
 
 struct MyCanvas <: NanoGUI.Canvas
-    children::Vector{Widget}
     destructor
 end
 
@@ -18,14 +17,14 @@ GLSL(src) = """
 $src
 """
 
-function MyCanvas(parent::Window)
+function MyCanvas()
     vao = GLuint(0)
-    @c glGenVertexArrays(1, &vao)
-    glBindVertexArray(vao)
+    @c (CHK ∘ glGenVertexArrays)(1, &vao)
+    (CHK ∘ glBindVertexArray)(vao)
 
     vbo = GLuint(0)
-    @c glGenBuffers(1, &vbo)
-    glBindBuffer(GL_ARRAY_BUFFER, vbo)
+    @c (CHK ∘ glGenBuffers)(1, &vbo)
+    (CHK ∘ glBindBuffer)(GL_ARRAY_BUFFER, vbo)
 
     vertices = Cfloat[
          0.0,  0.5,
@@ -33,7 +32,7 @@ function MyCanvas(parent::Window)
         -0.5, -0.5,
     ]
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
+    (CHK ∘ glBufferData)(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
 
     vertexSource = GLSL("""
 in vec2 position;
@@ -44,8 +43,8 @@ void main() {
     """)
 
     vertexShader = glCreateShader(GL_VERTEX_SHADER)
-    glShaderSource(vertexShader, 1, [pointer(vertexSource)], C_NULL)
-    glCompileShader(vertexShader)
+    (CHK ∘ glShaderSource)(vertexShader, 1, [pointer(vertexSource)], C_NULL)
+    (CHK ∘ glCompileShader)(vertexShader)
 
     fragmentSource = GLSL("""
 out vec4 outColor;
@@ -56,38 +55,33 @@ void main() {
     """)
 
     fragmentShader = glCreateShader(GL_FRAGMENT_SHADER)
-    @c glShaderSource(fragmentShader, 1, [pointer(fragmentSource)], C_NULL)
-    glCompileShader(fragmentShader)
+    @c (CHK ∘ glShaderSource)(fragmentShader, 1, [pointer(fragmentSource)], C_NULL)
+    (CHK ∘ glCompileShader)(fragmentShader)
 
     shaderProgram = glCreateProgram()
-    glAttachShader(shaderProgram, vertexShader)
-    glAttachShader(shaderProgram, fragmentShader)
-    glBindFragDataLocation(shaderProgram, 0, "outColor")
-    glLinkProgram(shaderProgram)
-    glUseProgram(shaderProgram)
+    (CHK ∘ glAttachShader)(shaderProgram, vertexShader)
+    (CHK ∘ glAttachShader)(shaderProgram, fragmentShader)
+    (CHK ∘ glBindFragDataLocation)(shaderProgram, 0, "outColor")
+    (CHK ∘ glLinkProgram)(shaderProgram)
+    (CHK ∘ glUseProgram)(shaderProgram)
 
     posAttrib = glGetAttribLocation(shaderProgram, "position")
-    glEnableVertexAttribArray(posAttrib)
-    glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, C_NULL)
+    (CHK ∘ glEnableVertexAttribArray)(posAttrib)
+    (CHK ∘ glVertexAttribPointer)(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, C_NULL)
 
     function destructor()
-        glDeleteProgram(shaderProgram)
-        glDeleteShader(fragmentShader)
-        glDeleteShader(vertexShader)
-        @c glDeleteBuffers(1, &vbo)
-        @c glDeleteVertexArrays(1, &vao)
+        (CHK ∘ glDeleteProgram)(shaderProgram)
+        (CHK ∘ glDeleteShader)(fragmentShader)
+        (CHK ∘ glDeleteShader)(vertexShader)
+        @c (CHK ∘ glDeleteBuffers)(1, &vbo)
+        @c (CHK ∘ glDeleteVertexArrays)(1, &vao)
     end
 
-    canvas = MyCanvas([], destructor)
-    add_child(parent, canvas)
+    MyCanvas(destructor)
 end
 
 struct MyApplication <: NanoGUI.Application
     screen::Screen
-end
-
-function draw(app::MyApplication, ctx::NVGcontext)
-    draw(app.screen, ctx)
 end
 
 function keyboard_event(screen::Screen, key, scancode, action, modifiers)::Bool
@@ -101,7 +95,7 @@ end
 function MyApplication()
     screen = NanoGUI.Screen(Vector2i(800, 600), caption="NanoGUI Test", resizable=false)
     window = NanoGUI.Window(screen, caption="Canvas widget demo")
-    MyCanvas(window)
+    add_child(window, MyCanvas())
     MyApplication(screen)
 end
 

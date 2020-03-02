@@ -15,7 +15,7 @@ using CSyntax
 using LinearAlgebra
 using StaticArrays
 
-export Vector2i, Vector3f, glfwGetTime
+export CHK, Vector2i, Vector3f, glfwGetTime
 include("NanoGUI/glfw.jl")
 
 export Widget, add_child
@@ -24,7 +24,7 @@ include("NanoGUI/widget.jl")
 export Screen, Window, set_visible
 include("NanoGUI/screen.jl")
 
-export NVGcontext, draw_all
+export draw_all
 include("NanoGUI/application.jl")
 
 include("NanoGUI/mainloop.jl")
