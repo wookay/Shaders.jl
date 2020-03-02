@@ -23,6 +23,7 @@ function mainloop(app, refresh::Float64)
             return
         end
         GLFW.WaitEvents()
+        yield()
     end
 
     quantum::Float32 = 0.0
@@ -42,9 +43,7 @@ function mainloop(app, refresh::Float64)
             for i in 1:quantum_count
                 !mainloop_active && return
                 sleep(quantum * 1e-6)
-                for screen in screens
-                    redraw(screen)
-                end
+                redraw(app.screen)
             end
         end
     end
@@ -52,6 +51,7 @@ function mainloop(app, refresh::Float64)
         mainloop_iteration()
     end
     GLFW.PollEvents()
+    fetch(refresh_thread)
 end
 
 function shutdown(app)

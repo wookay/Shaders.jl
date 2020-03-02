@@ -18,8 +18,10 @@ function perspective(fov, near, far, aspect = 1)
 end
 
 function draw_contents(canvas::MyCanvas)
-    @info :draw_contents canvas
-    m_rotation = 0
+    # @info :draw_contents canvas
+    t::Cfloat = glfwGetTime()
+    @info :t t
+    m_rotation::Cfloat = 0
     m_size = canvas.wsize
     # look_at perspective
     mvp = Cfloat[1 1 1 1

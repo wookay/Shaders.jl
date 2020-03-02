@@ -186,12 +186,6 @@ function draw_all(screen::Screen)
 
         GLFW.MakeContextCurrent(screen.glfw_window)
 
-        # @c GLFW.GetFramebufferSize(screen.glfw_window, &m_fbsize[1], &m_fbsize[2]);
-        # @c GLFW.GetWindowSize(screen.glfw_window, &m_size[1], &m_size[2]);
-        #if m_size[0]
-        #    screen.m_pixel_ratio = (float) m_fbsize[0] / (float) m_size[0];
-        #end
-
         (CHK ∘ glViewport)(0, 0, screen.fbsize...)
 
         draw_contents(screen)

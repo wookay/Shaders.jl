@@ -16,7 +16,7 @@ mutable struct RenderPass
     m_depth_test::DepthTest
     m_depth_write::Bool
 #    CullMode m_cull_mode;
-#   ref<Object> m_blit_target;
+    m_blit_target #  ref<Object>
     m_active::Bool
     m_framebuffer_handle::UInt64
     m_viewport_backup::SVector{4, Cint}
@@ -67,6 +67,11 @@ struct FragmentShader <: AbstractShader
     body::String
 end
 
+@enum TextureFlags begin
+    ShaderRead   = 0x01
+    RenderTarget = 0x02
+end
+
 function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_target, clear::Bool)
     m_targets = Vector(undef, length(color_targets) + 2)
     m_clear = clear
@@ -77,7 +82,7 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
     m_depth_test = Less
     m_depth_write = true
     #m_cull_mode(CullMode::Back)
-    #m_blit_target(blit_target)
+    m_blit_target = blit_target
     m_active = false
 
     m_targets[1] = depth_target
@@ -113,16 +118,17 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
         end
 
         if target isa Screen
-            m_framebuffer_size = max(m_framebuffer_size, target.fbsize)
+            screen = target
+            m_framebuffer_size = max(m_framebuffer_size, screen.fbsize)
             i >= 2 && push!(draw_buffers, GL_BACK_LEFT)
             has_screen = true
         elseif target isa Texture
-            #if (texture->flags() & Texture::TextureFlags::ShaderRead) {
-            #    CHK(glFramebufferTexture2D(GL_FRAMEBUFFER, attachment_id, GL_TEXTURE_2D,
-            #                               texture->texture_handle(), 0));
-            #} else {
-            #    CHK(glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment_id, GL_RENDERBUFFER,
-            #                                  texture->renderbuffer_handle()));
+            texture = target
+            if texture.flags & ShaderRead
+                (CHK ∘ glFramebufferTexture2D)(GL_FRAMEBUFFER, attachment_id, GL_TEXTURE_2D, texture.m_texture_handle, 0)
+            else
+                (CHK ∘ glFramebufferRenderbuffer)(GL_FRAMEBUFFER, attachment_id, GL_RENDERBUFFER, texture.m_renderbuffer_handle)
+            end
             i >= 2 && push!(draw_buffers, attachment_id)
             m_framebuffer_size = max(m_framebuffer_size, target.size)
             has_texture = true
@@ -161,7 +167,7 @@ function RenderPass(color_targets::Vector, depth_target, stencil_target, blit_ta
         m_depth_test::DepthTest,
         m_depth_write::Bool,
 #        CullMode m_cull_mode;
-#       ref<Object> m_blit_target;
+        m_blit_target,
         m_active::Bool,
         m_framebuffer_handle::UInt64,
         m_viewport_backup::SVector{4, Cint},
@@ -207,7 +213,83 @@ function set_viewport(render_pass::RenderPass, offset::Vector2i, size::Vector2i)
     end
 end
 
+function blit_to(render_pass::RenderPass, src_offset::Vector2i, src_size::Vector2i, dst::Union{Screen, RenderPass}, dst_offset::Vector2i)
+    target_id::GLuint = 0
+    what::GLenum = 0
+
+    if dst isa Screen
+        screen = dst
+        what = GL_COLOR_BUFFER_BIT
+        if screen.depth_buffer # && render_pass.m_targets[1]
+            what |= GL_STENCIL_BUFFER_BIT
+        end
+        if screen.stencil_buffer # && render_pass.m_targets[2]
+            what |= GL_STENCIL_BUFFER_BIT
+        end
+    elseif dst isa RenderPass
+        rp = dst
+        target_id = rp.m_framebuffer_handle
+        if !isempty(rp.m_targets) # && rp->targets()[1] && render_pass.m_targets[1]
+            what |= GL_DEPTH_BUFFER_BIT
+        end
+        if length(rp.m_targets) > 1 # && rp->targets()[2] && m_targets[2])
+            what |= GL_STENCIL_BUFFER_BIT
+        end
+        if length(rp.m_targets) > 2 # && rp->targets()[3] && m_targets[3])
+            what |= GL_COLOR_BUFFER_BIT
+        end
+    else
+        throw(RuntimeError("blit_to(): 'dst' must either be a RenderPass or a Screen instance."))
+    end
+
+    (CHK ∘ glBindFramebuffer)(GL_READ_FRAMEBUFFER, m_framebuffer_handle)
+    (CHK ∘ glBindFramebuffer)(GL_DRAW_FRAMEBUFFER, target_id)
+
+    if target_id == 0
+        (CHK ∘ glDrawBuffer)(GL_BACK)
+    end
+
+    src_end = Vector2i(src_offset + src_size)
+    dst_end = Vector2i(dst_offset + src_size)
+
+    (CHK ∘ glBlitFramebuffer)(GLsizei(src_offset[1]), GLsizei(src_offset[2]),
+                          GLsizei(src_end[1]), GLsizei(src_end[2]),
+                          GLsizei(dst_offset[1]), GLsizei(dst_offset[2]),
+                          GLsizei(dst_end[1]), GLsizei(dst_end[2]),
+                          what, GL_NEAREST)
+
+    (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, 0)
+end
+
 function end_render_pass(render_pass::RenderPass)
+    (CHK ∘ glBindFramebuffer)(GL_FRAMEBUFFER, 0)
+    if render_pass.m_blit_target != C_NULL
+        blit_to(Vector2i(0, 0), render_pass.m_framebuffer_size, render_pass.m_blit_target, Vector2i(0, 0))
+    end
+
+    (CHK ∘ glViewport)(render_pass.m_viewport_backup...)
+    (CHK ∘ glScissor)(render_pass.m_scissor_backup...)
+
+    function f(opt, val)
+        if opt
+            (CHK ∘ glEnable)(val)
+        else
+            (CHK ∘ glDisable)(val)
+        end
+    end
+    f(render_pass.m_depth_test_backup, GL_DEPTH_TEST)
+
+    (CHK ∘ glDepthMask)(render_pass.m_depth_write_backup)
+
+    f(render_pass.m_scissor_test_backup, GL_SCISSOR_TEST)
+    f(render_pass.m_cull_face_backup, GL_CULL_FACE)
+    f(render_pass.m_blend_backup, GL_BLEND)
+
+    render_pass.m_active = false
+
+    # dispose
+    m_framebuffer_handle_32 = UInt32(render_pass.m_framebuffer_handle)
+    @c (CHK ∘ glDeleteFramebuffers)(1, &m_framebuffer_handle_32)
 end
 
 function set_uniform(shader::Shader, name::String, value::Array{T}) where T
@@ -312,6 +394,7 @@ function end_shader(shader::Shader)
 end
 
 function draw_array(primitive_type::PrimitiveType, offset::Int, count::Int, indexed::Bool)
+    # @info :draw_array primitive_type
     primitive_type_gl =
         if primitive_type == Point
             GL_POINTS
