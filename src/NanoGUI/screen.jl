@@ -35,7 +35,7 @@ function Window(screen::Screen; caption::AbstractString = "")
 end
 
 # nanogui-mitsuba/src/screen.cpp
-function Screen(wsize::Vector2i, background::RGBA, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)::Screen
+function Screen(wsize::Vector2i, background::RGBA, caption::AbstractString, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)::Screen
     GLFW.WindowHint(GLFW.CLIENT_API, GLFW.OPENGL_API)
 
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MAJOR, gl_major)
@@ -171,9 +171,6 @@ function redraw(screen::Screen)
     if !screen.redraw
         screen.redraw = true
     end
-end
-
-function perform_layout(screen::Screen)
 end
 
 function keyboard_event(_, key, scancode, action, modifiers)

@@ -108,5 +108,4 @@ function MyApplication()
     MyApplication(screen)
 end
 
-app = MyApplication()
-NanoGUI.mainloop(app)
+NanoGUI.mainloop(MyApplication)
