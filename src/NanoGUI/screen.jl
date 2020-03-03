@@ -40,8 +40,8 @@ function Screen(wsize::Vector2i, background::RGBA, caption::String, resizable::B
 
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MAJOR, gl_major)
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MINOR, gl_minor)
-    GLFW.WindowHint(GLFW.OPENGL_FORWARD_COMPAT, true)
     GLFW.WindowHint(GLFW.OPENGL_PROFILE, GLFW.OPENGL_CORE_PROFILE)
+    GLFW.WindowHint(GLFW.OPENGL_FORWARD_COMPAT, true)
 
     color_bits, depth_bits, stencil_bits = 8, 0, 0
     if stencil_buffer && !depth_buffer
@@ -105,7 +105,7 @@ function Screen(wsize::Vector2i, background::RGBA, caption::String, resizable::B
     screen
 end
 
-function Screen(wsize::Vector2i; background::RGBA = RGBA(0.3, 0.3, 0.32, 1.), caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(2))::Screen
+function Screen(wsize::Vector2i; background::RGBA = RGBA(0.3, 0.3, 0.32, 1.), caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(3))::Screen
     Screen(wsize::Vector2i, background, caption::String, resizable::Bool, fullscreen::Bool, depth_buffer::Bool, stencil_buffer::Bool, float_buffer::Bool, gl_major::UInt, gl_minor::UInt)
 end
 

@@ -6,56 +6,63 @@ function init()
     glfwSetTime(0)
 end
 
-function mainloop(app, refresh::Float64)
+function microseconds(μs)
+    μs
+end
+
+function mainloop(app, refresh::Float64=1000(1 / 60), closenotify=Condition())
+    NanoGUI.init()
+    draw_all(app)
+    set_visible(app, true)
+
     mainloop_active = true
 
-    function mainloop_iteration()
-        num_screens = 0
+    function mainloop_iteration(app) # mainloop_active
+        run = true
         if !app.screen.visible
+            run = false
         elseif GLFW.WindowShouldClose(app.screen.glfw_window)
+            run = false
             set_visible(app, false)
         else
-            num_screens += 1
             draw_all(app.screen)
         end
-        if iszero(num_screens)
+        if !run
             mainloop_active = false
-            return
+            dispose(app.screen)
+            GLFW.DestroyWindow(app.screen.glfw_window)
+            GLFW.Terminate()
+            notify(closenotify)
         end
-        GLFW.WaitEvents()
-        yield()
     end
 
-    quantum::Float32 = 0.0
+    quantum_ms::Float32 = 0.0f0
     quantum_count::Csize_t = 1
     if refresh >= 0
-        quantum = microseconds(refresh * 1000)
-        while quantum > 50_000
-            quantum /= 2
+        quantum_ms = microseconds(refresh * 1000)
+        while quantum_ms > 50_000
+            quantum_ms /= 2
             quantum_count *= 2
         end
     else
-        quantum = microseconds(50_000) # 50ms
+        quantum_ms = microseconds(50_000) # 50ms
         quantum_count = typemax(Csize_t)
     end
-    refresh_thread = Threads.@spawn begin
+    quantum = quantum_ms * 1e-6
+    refresh_task = @async begin
         while true
             for i in 1:quantum_count
                 !mainloop_active && return
-                sleep(quantum * 1e-6)
+                sleep(quantum)
                 redraw(app.screen)
             end
         end
     end
-    while mainloop_active
-        mainloop_iteration()
+    mainloop_task = @async while mainloop_active
+        mainloop_iteration(app)
+        yield()
+        GLFW.WaitEvents(quantum)
     end
-    GLFW.PollEvents()
-    fetch(refresh_thread)
-end
-
-function shutdown(app)
-    dispose(app.screen)
-    GLFW.DestroyWindow(app.screen.glfw_window)
-    GLFW.Terminate()
+    iszero(Base.JLOptions().isinteractive) && wait(closenotify)
+    (mainloop_task, refresh_task)
 end

@@ -4,19 +4,17 @@ import .NanoGUI: draw_contents, keyboard_event
 using ModernGL
 using CSyntax
 
+GLSL(src) = string("#version 150 core\n", src)
+
 struct MyCanvas <: NanoGUI.Canvas
     destructor
 end
 
 function draw_contents(canvas::MyCanvas)
-    glDrawArrays(GL_TRIANGLES, 0, 3)
+    (CHK ∘ glDrawArrays)(GL_TRIANGLES, 0, 3)
 end
 
-GLSL(src) = """
-#version 150 core
-$src
-"""
-
+# code from https://github.com/zuck/opengl-examples/blob/master/Examples/Triangle/main.cpp
 function MyCanvas()
     vao = GLuint(0)
     @c (CHK ∘ glGenVertexArrays)(1, &vao)
@@ -43,19 +41,19 @@ void main() {
     """)
 
     vertexShader = glCreateShader(GL_VERTEX_SHADER)
-    (CHK ∘ glShaderSource)(vertexShader, 1, [pointer(vertexSource)], C_NULL)
+    (CHK ∘ glShaderSource)(vertexShader, 1, (Ref ∘ pointer)(vertexSource), C_NULL)
     (CHK ∘ glCompileShader)(vertexShader)
 
     fragmentSource = GLSL("""
 out vec4 outColor;
 
 void main() {
-    outColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    outColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
 }
     """)
 
     fragmentShader = glCreateShader(GL_FRAGMENT_SHADER)
-    @c (CHK ∘ glShaderSource)(fragmentShader, 1, [pointer(fragmentSource)], C_NULL)
+    @c (CHK ∘ glShaderSource)(fragmentShader, 1, (Ref ∘ pointer)(fragmentSource), C_NULL)
     (CHK ∘ glCompileShader)(fragmentShader)
 
     shaderProgram = glCreateProgram()
@@ -66,8 +64,8 @@ void main() {
     (CHK ∘ glUseProgram)(shaderProgram)
 
     posAttrib = glGetAttribLocation(shaderProgram, "position")
-    (CHK ∘ glEnableVertexAttribArray)(posAttrib)
     (CHK ∘ glVertexAttribPointer)(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, C_NULL)
+    (CHK ∘ glEnableVertexAttribArray)(posAttrib)
 
     function destructor()
         (CHK ∘ glDeleteProgram)(shaderProgram)
@@ -80,16 +78,16 @@ void main() {
     MyCanvas(destructor)
 end
 
-struct MyApplication <: NanoGUI.Application
-    screen::Screen
-end
-
 function keyboard_event(screen::Screen, key, scancode, action, modifiers)::Bool
     if key == GLFW.KEY_ESCAPE && action == GLFW.PRESS
         set_visible(screen, false)
         return true
     end
     return false
+end
+
+struct MyApplication <: NanoGUI.Application
+    screen::Screen
 end
 
 function MyApplication()
@@ -100,11 +98,4 @@ function MyApplication()
 end
 
 app = MyApplication()
-
-NanoGUI.init()
-
-draw_all(app)
-set_visible(app, true)
-
-NanoGUI.mainloop(app, 1000(1 / 60))
-NanoGUI.shutdown(app)
+NanoGUI.mainloop(app)
