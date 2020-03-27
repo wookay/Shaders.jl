@@ -1,5 +1,6 @@
 module Shaders
 
-include("NanoGUI.jl")
+include("ReviseShaders.jl")
+include("MGL.jl")
 
 end # module Shaders
