@@ -59,14 +59,14 @@ function set_visible(ctx, visible::Bool)
     (visible ? GLFW.ShowWindow : GLFW.HideWindow)(ctx.glfw_wnd)
 end
 
-function draw_all(app, glfw_wnd)
+function draw_all(app::Ref, glfw_wnd)
     glfw_time = glfwGetTime()
 
     GLFW.MakeContextCurrent(glfw_wnd)
-    glClearColor(app.ctx.background)
+    glClearColor(app[].ctx.background)
 
     (before ∘ render)
-    Base.invokelatest(render, app, glfw_time, 0)
+    Base.invokelatest(render, app[], glfw_time, 0)
     (after ∘ render)
 
     GLFW.SwapBuffers(glfw_wnd)
@@ -85,7 +85,7 @@ function mainloop(ctx::Ctx, refresh::Float64=1000inv(60), closenotify=Condition(
     end
     GLFW.SetKeyCallback(ctx.glfw_wnd, key_callback)
 
-    function mainloop_iteration(app) # mainloop_active
+    function mainloop_iteration(app::Ref) # mainloop_active
         if GLFW.WindowShouldClose(ctx.glfw_wnd)
             is_running = false
             set_visible(ctx, false)
@@ -101,7 +101,7 @@ function mainloop(ctx::Ctx, refresh::Float64=1000inv(60), closenotify=Condition(
         end
     end
 
-    function mainloop_func(app, quantum) # mainloop_active
+    function mainloop_func(app::Ref, quantum) # mainloop_active
         set_visible(ctx, true)
         while mainloop_active
             mainloop_iteration(app)
@@ -111,8 +111,8 @@ function mainloop(ctx::Ctx, refresh::Float64=1000inv(60), closenotify=Condition(
     end
 
     quantum = get_quantum(refresh)
-    # mainloop_func(ctx.app[], quantum)
-    ctx.task = Task(() -> mainloop_func(ctx.app[], quantum))
+    # mainloop_func(ctx.app, quantum)
+    ctx.task = Task(() -> mainloop_func(ctx.app, quantum))
 
     schedule(ctx.task)
 
@@ -190,6 +190,18 @@ function runloop(::Type{T}, ctx::Ctx) where {T <: WindowConfig}
         ctx.app[] = T(ctx)
     end
     ctx
+end
+
+using ..ReviseShaders
+
+function Base.run(::Type{T}) where {T <: WindowConfig}
+    if isdefined(Main, :Revise)
+        frame = stacktrace()[2]
+        file = String(frame.file)
+        dirfull = dirname(file)
+        !haskey(ReviseShaders.Revise.watched_files, dirfull) && ReviseShaders.track(T, file)
+    end
+    runloop(T)
 end
 
 # module Shaders.MGL

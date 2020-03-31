@@ -2,21 +2,10 @@
 
 abstract type WindowConfig end
 
-using ..ReviseShaders
 using ModernGL
 using CSyntax
 
 GLSL(src) = string("#version 330 core\n", src)
-
-function Base.run(::Type{T}) where {T <: WindowConfig}
-    if isdefined(Main, :Revise)
-        frame = stacktrace()[2]
-        file = String(frame.file)
-        dirfull = dirname(file)
-        !haskey(ReviseShaders.Revise.watched_files, dirfull) && ReviseShaders.track(T, file)
-    end
-    runloop(T)
-end
 
 function render
 end
