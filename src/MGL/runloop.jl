@@ -65,7 +65,9 @@ function draw_all(app, glfw_wnd)
     GLFW.MakeContextCurrent(glfw_wnd)
     glClearColor(app.ctx.background)
 
+    (before ∘ render)
     Base.invokelatest(render, app, glfw_time, 0)
+    (after ∘ render)
 
     GLFW.SwapBuffers(glfw_wnd)
 end
@@ -109,7 +111,7 @@ function mainloop(ctx::Ctx, refresh::Float64=1000inv(60), closenotify=Condition(
     end
 
     quantum = get_quantum(refresh)
-    # mainloop_task = mainloop_func(ctx.app[], quantum)
+    # mainloop_func(ctx.app[], quantum)
     ctx.task = Task(() -> mainloop_func(ctx.app[], quantum))
 
     schedule(ctx.task)
@@ -128,7 +130,7 @@ function glClearColor(background::RGBA)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 end
 
-function create_glfw_window(wsize::Vector2i = Vector2i((800, 600)); background::RGBA = RGBA(0.3, 0.3, 0.32, 1.), caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(3))
+function create_glfw_window(wsize::Vector2i = Vector2i((640, 480)); background::RGBA = RGBA(0.3, 0.3, 0.32, 1.), caption::String = "Unnamed", resizable::Bool = true, fullscreen::Bool = false, depth_buffer::Bool = true, stencil_buffer::Bool = true, float_buffer::Bool = false, gl_major::UInt = UInt(3), gl_minor::UInt = UInt(3))
     GLFW.WindowHint(GLFW.CLIENT_API,            GLFW.OPENGL_API)
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MAJOR, gl_major)
     GLFW.WindowHint(GLFW.CONTEXT_VERSION_MINOR, gl_minor)

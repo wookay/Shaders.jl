@@ -33,9 +33,13 @@ struct Buffer
     size
 end
 
+struct IndexBuffer{T}
+    indices
+end
+
 struct VertexArray
-    id::GLuint
     prog::Program
+    id::GLuint
     count
 end
 
@@ -49,6 +53,35 @@ function CHK(::Nothing)
     err == GL_INVALID_OPERATION ? "GL_INVALID_OPERATION: The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag." :
     err == GL_INVALID_FRAMEBUFFER_OPERATION ? "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag." :
     err == GL_OUT_OF_MEMORY ? "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded." : "Unknown OpenGL error with error code $err.")
+end
+
+function before
+end
+
+function after
+end
+
+const _debug_env = get(ENV, "DEBUG", nothing) !== nothing
+_debug_chk = _debug_env
+
+function Base.:∘(::typeof(before), ::typeof(render))
+    global _debug_chk = false
+end
+
+function Base.:∘(::typeof(after), ::typeof(render))
+    global _debug_chk = _debug_env
+end
+
+function Base.:∘(::typeof(CHK), f::Function)
+    global _debug_chk
+    function (args...)
+        if _debug_chk
+            print("(CHK ∘ ")
+            printstyled(f, color=:yellow)
+            print(")", args, "\n")
+        end
+        CHK(f(args...))
+    end
 end
 
 function CHK_glCompileShader(shader)
@@ -113,29 +146,36 @@ function create_buffer(ctx, data)::Buffer
 end
 Base.:∘(::typeof(create), ::Type{Buffer}) = create_buffer
 
-function create_vertex_array(ctx, prog::Program, vao_id::GLuint, vbo::Buffer, name::String)::VertexArray
-    (vao_count, number_of_components) = vbo.size
-    al = glGetAttribLocation(prog.id, name)
-    (CHK ∘ glVertexAttribPointer)(al, number_of_components, GL_FLOAT, GL_FALSE, vao_count * sizeof(Cfloat), C_NULL)
-    (CHK ∘ glEnableVertexAttribArray)(al)
-    VertexArray(vao_id, prog, vao_count)
-end
-
-function create_vertex_array(ctx, prog::Program, vertices::Matrix, name::String)::VertexArray
+function create_vertex_array(ctx, prog::Program, content::NamedTuple, index_buffer::Union{Nothing,IndexBuffer}=nothing)::VertexArray
     vao_id = GLuint(0)
     @c (CHK ∘ glGenVertexArrays)(1, &vao_id)
 
-    vbo = (create ∘ Buffer)(ctx, vertices)
+    vao_count = 0
+    for (sym, vertices) in pairs(content)
+        vbo = (create ∘ Buffer)(ctx, vertices)
+        name = String(sym)
+        (CHK ∘ glBindVertexArray)(vao_id)
+        (num_rows, num_components) = vbo.size
+        vao_count += num_rows
+        location = glGetAttribLocation(prog.id, name)
+        (CHK ∘ glVertexAttribPointer)(location, num_components, GL_FLOAT, GL_FALSE, 0, C_NULL)
+        (CHK ∘ glEnableVertexAttribArray)(location)
+    end
 
-    (CHK ∘ glBindVertexArray)(vao_id)
-    create_vertex_array(ctx, prog, vao_id, vbo, name)
+    VertexArray(prog, vao_id, vao_count)
+end
+
+function create_vertex_array(ctx, prog::Program, vertices::AbstractArray{T,2}, name::String)::VertexArray where T
+    content = NamedTuple{(Symbol(name),)}((vertices,))
+    create_vertex_array(ctx, prog, content)
 end
 Base.:∘(::typeof(create), ::Type{VertexArray}) = create_vertex_array
 
-function render(vao::VertexArray, mode)
+function render(vao::VertexArray, mode::GLenum=ModernGL.GL_TRIANGLES; first=0)
     (CHK ∘ glUseProgram)(vao.prog.id)
     (CHK ∘ glBindVertexArray)(vao.id)
-    (CHK ∘ glDrawArrays)(mode, 0, vao.count)
+
+    (CHK ∘ glDrawArrays)(mode, first, vao.count)
 end
 
 # module Shaders.MGL
